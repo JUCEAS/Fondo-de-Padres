@@ -15,12 +15,24 @@
   var state = null;
   var appConfig = { pin: null };
   var editorUnlocked = false;
+  var viewerLocked = false;
   var settingsOpen = false;
   var pinPanelOpen = false;
   var pinError = '';
   var connStatus = 'connecting'; // connecting | synced | offline | error | config
 
   try { editorUnlocked = localStorage.getItem('fg_editor') === '1'; } catch (e) {}
+  try { viewerLocked = localStorage.getItem('fg_viewer_locked') === '1'; } catch (e) {}
+
+  // Una vez que un dispositivo se fija como "solo lectura", el botón para
+  // desbloquear edición desaparece. Para recuperarlo en ese mismo dispositivo
+  // (por ejemplo si vos mismo lo bloqueaste sin querer), abrí la app agregando
+  // ?editor al final del link, ej: https://tu-link/?editor
+  function showUnlockOption(){
+    if (editorUnlocked) return false;
+    if (!viewerLocked) return true;
+    try { return /[?&#]editor\b/.test(window.location.href); } catch (e) { return false; }
+  }
 
   function uid(){ return 'p' + Math.random().toString(36).slice(2, 9); }
   function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
@@ -291,7 +303,10 @@
           connBadgeHTML() +
           (editorUnlocked ?
             '<span class="badge badge-editor">Editor</span><button type="button" class="icon-btn" data-action="toggle-settings" title="Ajustes">⚙</button>' :
-            '<span class="badge badge-view">Solo lectura</span><button type="button" class="btn btn-outline btn-sm" data-action="open-pin">Desbloquear edición</button>') +
+            '<span class="badge badge-view">Solo lectura</span>' + (showUnlockOption() ?
+              '<button type="button" class="btn btn-outline btn-sm" data-action="open-pin">Desbloquear edición</button>' +
+              '<button type="button" class="icon-btn" data-action="lock-viewer" title="Fijar este dispositivo como solo lectura y no volver a mostrar este botón">🔒</button>'
+              : '')) +
         '</div>' +
       '</header>' +
 
@@ -412,6 +427,12 @@
     else if (action === 'cancel-pin') { pinPanelOpen = false; pinError = ''; render(); }
     else if (action === 'submit-pin') { var el = document.getElementById('pin-input'); tryUnlock(el ? el.value.trim() : ''); }
     else if (action === 'lock-device') { lockDevice(); }
+    else if (action === 'lock-viewer') {
+      viewerLocked = true;
+      try { localStorage.setItem('fg_viewer_locked', '1'); } catch (e) {}
+      pinPanelOpen = false;
+      render();
+    }
     else if (action === 'delete-parent') { var id = btn.getAttribute('data-id'); mutate(function(){ state.padres = state.padres.filter(function(p){ return p.id !== id; }); }); }
     else if (action === 'delete-month') { var m = btn.getAttribute('data-month'); mutate(function(){ state.meses = state.meses.filter(function(x){ return x !== m; }); state.padres.forEach(function(p){ delete p.pagos[m]; }); }); }
     else if (action === 'add-parent') { addParentFromForm(); }
