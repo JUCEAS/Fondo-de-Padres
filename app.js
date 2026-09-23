@@ -277,8 +277,6 @@
       state.meses.map(function(m){ return '<td class="col-month amt-cell">' + fmt(totalMes(m)) + '</td>'; }).join('') +
       '<td class="col-total">' + fmt(total) + '</td><td class="col-status"></td><td class="col-del"></td></tr></tfoot>' : '';
 
-    var waUrl = 'https://wa.me/?text=' + encodeURIComponent(waText());
-
     var controls = editorUnlocked ?
       '<div class="ledger-controls">' +
         '<div class="add-group">' +
@@ -335,9 +333,9 @@
 
       '<section class="toolbar">' +
         '<button type="button" class="btn btn-primary" data-action="download-pdf">⬇ Descargar reporte PDF</button>' +
-        '<a class="btn btn-whatsapp" href="' + waUrl + '" target="_blank" rel="noopener noreferrer">Compartir resumen por WhatsApp</a>' +
+        '<button type="button" class="btn btn-whatsapp" data-action="share-pdf">Compartir PDF por WhatsApp</button>' +
       '</section>' +
-      '<p class="footnote">El PDF se descarga a tu dispositivo. Para enviarlo por WhatsApp, adjúntalo manualmente después de descargarlo.</p>'
+      '<p class="footnote">En el celular, "Compartir PDF" abre el menú para enviarlo directo por WhatsApp (u otra app). En computadora, se descarga y lo adjuntás vos a mano.</p>'
     );
   }
 
@@ -418,6 +416,43 @@
     doc.save(slug(state.evento) + '.pdf');
   }
 
+  function fallbackShare(doc){
+    // No se puede compartir el archivo directamente: se descarga el PDF
+    // y se abre WhatsApp con el resumen en texto, para que el usuario
+    // adjunte el PDF manualmente desde su carpeta de descargas.
+    doc.save(slug(state.evento) + '.pdf');
+    var waUrl = 'https://wa.me/?text=' + encodeURIComponent(waText());
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleSharePdf(){
+    var doc = buildPdf();
+    if (!doc) return;
+
+    var canUseFileShare = !!(navigator.share && navigator.canShare && window.File && window.Blob);
+    if (!canUseFileShare) { fallbackShare(doc); return; }
+
+    try {
+      var blob = doc.output('blob');
+      var filename = slug(state.evento) + '.pdf';
+      var file = new File([blob], filename, { type: 'application/pdf' });
+
+      if (!navigator.canShare({ files: [file] })) { fallbackShare(doc); return; }
+
+      navigator.share({
+        files: [file],
+        title: state.evento || 'Fondo de Graduación',
+        text: waText()
+      }).catch(function(err){
+        // El usuario canceló el menú de compartir, o el navegador lo rechazó.
+        // Si fue un rechazo real (no una cancelación), usamos el respaldo.
+        if (err && err.name !== 'AbortError') fallbackShare(doc);
+      });
+    } catch (e) {
+      fallbackShare(doc);
+    }
+  }
+
   document.addEventListener('click', function(e){
     var btn = e.target.closest ? e.target.closest('[data-action]') : null;
     if (!btn) return;
@@ -438,6 +473,7 @@
     else if (action === 'add-parent') { addParentFromForm(); }
     else if (action === 'add-month') { addMonthFromForm(); }
     else if (action === 'download-pdf') { handleDownloadPdf(); }
+    else if (action === 'share-pdf') { handleSharePdf(); }
   });
 
   document.addEventListener('change', function(e){
