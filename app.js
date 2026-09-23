@@ -18,6 +18,7 @@
   var viewerLocked = false;
   var settingsOpen = false;
   var pinPanelOpen = false;
+  var retiroPanelFor = null;
   var pinError = '';
   var connStatus = 'connecting'; // connecting | synced | offline | error | config
 
@@ -46,12 +47,16 @@
   }
   function totalPadre(p){ return state.meses.reduce(function(s, m){ return s + num(p.pagos[m]); }, 0); }
   function esperadoPadre(){ return num(state.cuota) * state.meses.length; }
-  function granTotal(){ return state.padres.reduce(function(s, p){ return s + totalPadre(p); }, 0); }
-  function granEsperado(){ return esperadoPadre() * state.padres.length; }
+  function activePadres(){ return state.padres.filter(function(p){ return !p.retirado; }); }
+  // Lo que queda en el fondo por este padre: lo que aportó, menos lo que se le
+  // devolvió si se retiró. Si el retiro fue con devolución total, queda en 0.
+  function netoPadre(p){ return totalPadre(p) - (p.retirado ? num(p.devolucion) : 0); }
+  function granTotal(){ return state.padres.reduce(function(s, p){ return s + netoPadre(p); }, 0); }
+  function granEsperado(){ return esperadoPadre() * activePadres().length; }
   function totalMes(m){ return state.padres.reduce(function(s, p){ return s + num(p.pagos[m]); }, 0); }
   function alDiaCount(){
     var esp = esperadoPadre();
-    return state.padres.filter(function(p){ return totalPadre(p) >= esp - 0.001; }).length;
+    return activePadres().filter(function(p){ return totalPadre(p) >= esp - 0.001; }).length;
   }
 
   function normalizeState(d){
@@ -62,7 +67,12 @@
     })();
     if (!Array.isArray(s.meses)) s.meses = [];
     if (!Array.isArray(s.padres)) s.padres = [];
-    s.padres.forEach(function(p){ if (!p.pagos) p.pagos = {}; if (!p.id) p.id = uid(); });
+    s.padres.forEach(function(p){
+      if (!p.pagos) p.pagos = {};
+      if (!p.id) p.id = uid();
+      if (typeof p.retirado !== 'boolean') p.retirado = false;
+      if (typeof p.devolucion !== 'number') p.devolucion = num(p.devolucion) || 0;
+    });
     if (typeof s.cuota !== 'number') s.cuota = num(s.cuota);
     if (!s.moneda) s.moneda = 'L';
     return s;
@@ -142,6 +152,7 @@
     editorUnlocked = false;
     try { localStorage.removeItem('fg_editor'); } catch (e) {}
     settingsOpen = false;
+    retiroPanelFor = null;
     render();
   }
   function changePin(newPin){
@@ -213,34 +224,62 @@
     var ok = tot >= esp - 0.001;
     var monthCells = state.meses.map(function(m){
       var v = num(p.pagos[m]);
-      if (editorUnlocked) {
+      if (editorUnlocked && !p.retirado) {
         return '<td class="col-month amt-cell"><input type="number" class="amt-input" inputmode="decimal" step="0.01" min="0" placeholder="0.00" data-parent="' + p.id + '" data-month="' + escapeHtml(m) + '" value="' + (v ? v : '') + '"></td>';
       }
       return '<td class="col-month amt-cell"><span class="amt-static">' + (v ? fmt(v) : '—') + '</span></td>';
     }).join('');
-    return '<tr>' +
+
+    var statusCell = p.retirado ?
+      ('<td class="col-status"><span class="pill" style="background:#e2e2e2;color:#555">Retirado</span>' +
+        '<span class="pill-caption">devuelto ' + fmt(p.devolucion) + '</span></td>') :
+      ('<td class="col-status"><span class="pill ' + (ok ? 'pill-ok' : 'pill-pending') + '">' + (ok ? 'Al día' : 'Pendiente') + '</span>' +
+        (!ok && esp > 0 ? '<span class="pill-caption">faltan ' + fmt(esp - tot) + '</span>' : '') +
+      '</td>');
+
+    var actionsCell = '<td class="col-del">' + (editorUnlocked ? (
+        (p.retirado ?
+          '<button type="button" class="mini-x" data-action="reactivar-parent" data-id="' + p.id + '" title="Reactivar a este padre">↺</button>' :
+          '<button type="button" class="mini-x" data-action="mark-retiro" data-id="' + p.id + '" title="Marcar como retirado y registrar devolución">↩</button>') +
+        '<button type="button" class="mini-x" data-action="delete-parent" data-id="' + p.id + '" title="Eliminar padre por completo (borra su historial, sin dejar rastro)">✕</button>'
+      ) : '') + '</td>';
+
+    return '<tr' + (p.retirado ? ' style="opacity:.6"' : '') + '>' +
       '<td class="col-name">' + escapeHtml(p.nombre) + '</td>' +
       '<td class="col-student">' + escapeHtml(p.alumno || '—') + '</td>' +
       monthCells +
       '<td class="col-total">' + fmt(tot) + '</td>' +
-      '<td class="col-status"><span class="pill ' + (ok ? 'pill-ok' : 'pill-pending') + '">' + (ok ? 'Al día' : 'Pendiente') + '</span>' +
-        (!ok && esp > 0 ? '<span class="pill-caption">faltan ' + fmt(esp - tot) + '</span>' : '') +
-      '</td>' +
-      '<td class="col-del">' + (editorUnlocked ? '<button type="button" class="mini-x" data-action="delete-parent" data-id="' + p.id + '" title="Eliminar padre">✕</button>' : '') + '</td>' +
+      statusCell +
+      actionsCell +
     '</tr>';
+  }
+
+  function retiroPanelHTML(p){
+    return '<section class="pin-panel">' +
+      '<p style="margin:0 0 10px;font-weight:600">Retirar a ' + escapeHtml(p.nombre) + '</p>' +
+      '<div class="field"><label for="retiro-monto">Monto a devolver</label>' +
+        '<input type="number" min="0" step="0.01" id="retiro-monto" value="' + num(totalPadre(p)) + '"></div>' +
+      '<p class="hint">Aportó ' + fmt(totalPadre(p)) + ' en total. Ajustá el monto si solo se le devuelve una parte. ' +
+        'El padre queda marcado como "Retirado" — no se borra, y su historial sigue apareciendo en el reporte PDF.</p>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-action="confirm-retiro" data-id="' + p.id + '">Confirmar retiro</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-action="cancel-retiro">Cancelar</button>' +
+    '</section>';
   }
 
   function waText(){
     var total = granTotal(), esperado = granEsperado();
     var pct = esperado > 0 ? Math.round((total / esperado) * 100) : 0;
     var esp = esperadoPadre();
-    var pendientes = state.padres.filter(function(p){ return totalPadre(p) < esp - 0.001; });
+    var activos = activePadres();
+    var pendientes = activos.filter(function(p){ return totalPadre(p) < esp - 0.001; });
+    var retiradosCount = state.padres.length - activos.length;
     var lines = [];
     lines.push('📋 *' + (state.evento || 'Fondo de Graduación') + '*');
     if (state.promocion) lines.push(state.promocion);
     lines.push('');
     lines.push('💰 Recaudado: ' + fmt(total) + ' de ' + fmt(esperado) + ' (' + pct + '%)');
-    lines.push('✅ Al día: ' + alDiaCount() + ' de ' + state.padres.length);
+    lines.push('✅ Al día: ' + alDiaCount() + ' de ' + activos.length);
+    if (retiradosCount) lines.push('↩ Retirados (con devolución): ' + retiradosCount);
     if (pendientes.length) {
       lines.push('');
       lines.push('⏳ Pendientes:');
@@ -261,6 +300,7 @@
     var total = granTotal(), esperado = granEsperado();
     var pct = esperado > 0 ? Math.min(100, Math.round((total / esperado) * 100)) : 0;
     var alDia = alDiaCount();
+    var retiradosCount = state.padres.length - activePadres().length;
     var colCount = 5 + state.meses.length;
 
     var monthHeaders = state.meses.map(function(m){
@@ -310,6 +350,10 @@
 
       (pinPanelOpen ? pinPanelHTML() : '') +
       (settingsOpen && editorUnlocked ? settingsPanelHTML() : '') +
+      (retiroPanelFor && editorUnlocked ? (function(){
+        var rp = state.padres.filter(function(x){ return x.id === retiroPanelFor; })[0];
+        return rp ? retiroPanelHTML(rp) : '';
+      })() : '') +
 
       '<section class="stats" aria-label="Resumen">' +
         '<div class="stat stat-hero">' +
@@ -318,9 +362,10 @@
           '<div class="progress"><div class="progress-fill" style="width:' + pct + '%"></div></div>' +
           '<span class="stat-caption">' + pct + '% de ' + fmt(esperado) + ' esperado</span>' +
         '</div>' +
-        '<div class="stat"><span class="stat-label">Padres al día</span><span class="stat-value-sm">' + alDia + ' <span class="stat-of">/ ' + state.padres.length + '</span></span></div>' +
+        '<div class="stat"><span class="stat-label">Padres al día</span><span class="stat-value-sm">' + alDia + ' <span class="stat-of">/ ' + activePadres().length + '</span></span></div>' +
         '<div class="stat"><span class="stat-label">Meses registrados</span><span class="stat-value-sm">' + state.meses.length + '</span></div>' +
         '<div class="stat"><span class="stat-label">Cuota sugerida</span><span class="stat-value-sm">' + fmt(state.cuota) + '<span class="stat-of">/mes</span></span></div>' +
+        (retiradosCount ? '<div class="stat"><span class="stat-label">Retirados</span><span class="stat-value-sm">' + retiradosCount + '</span></div>' : '') +
       '</section>' +
 
       '<section class="ledger" aria-label="Registro de aportaciones">' +
@@ -387,7 +432,7 @@
     var head = [['Padre/Madre', 'Alumno/a'].concat(state.meses).concat(['Total', 'Estado'])];
     var body = state.padres.map(function(p){
       var tot = totalPadre(p);
-      var est = tot >= esp - 0.001 ? 'Al día' : 'Pendiente';
+      var est = p.retirado ? ('Retirado (devuelto ' + fmt(p.devolucion) + ')') : (tot >= esp - 0.001 ? 'Al día' : 'Pendiente');
       return [p.nombre, p.alumno || '—'].concat(state.meses.map(function(m){ return p.pagos[m] ? fmt(p.pagos[m]) : '—'; })).concat([fmt(tot), est]);
     });
     var totalsRow = ['Total', ''].concat(state.meses.map(function(m){ return fmt(totalMes(m)); })).concat([fmt(granTotal()), '']);
@@ -407,7 +452,7 @@
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
     doc.text('Gran total recaudado: ' + fmt(granTotal()), 40, finalY);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-    doc.text('Meta esperada: ' + fmt(granEsperado()) + '   ·   Padres al día: ' + alDiaCount() + ' de ' + state.padres.length, 40, finalY + 16);
+    doc.text('Meta esperada: ' + fmt(granEsperado()) + '   ·   Padres al día: ' + alDiaCount() + ' de ' + activePadres().length, 40, finalY + 16);
     return doc;
   }
   function handleDownloadPdf(){
@@ -469,6 +514,29 @@
       render();
     }
     else if (action === 'delete-parent') { var id = btn.getAttribute('data-id'); mutate(function(){ state.padres = state.padres.filter(function(p){ return p.id !== id; }); }); }
+    else if (action === 'mark-retiro') {
+      retiroPanelFor = btn.getAttribute('data-id');
+      render();
+      setTimeout(function(){ var el = document.getElementById('retiro-monto'); if (el) { el.focus(); el.select(); } }, 0);
+    }
+    else if (action === 'cancel-retiro') { retiroPanelFor = null; render(); }
+    else if (action === 'confirm-retiro') {
+      var rid = btn.getAttribute('data-id');
+      var montoEl = document.getElementById('retiro-monto');
+      var monto = montoEl ? num(montoEl.value) : 0;
+      retiroPanelFor = null;
+      mutate(function(){
+        var rp = state.padres.filter(function(x){ return x.id === rid; })[0];
+        if (rp) { rp.retirado = true; rp.devolucion = monto; }
+      });
+    }
+    else if (action === 'reactivar-parent') {
+      var raid = btn.getAttribute('data-id');
+      mutate(function(){
+        var ap = state.padres.filter(function(x){ return x.id === raid; })[0];
+        if (ap) { ap.retirado = false; ap.devolucion = 0; }
+      });
+    }
     else if (action === 'delete-month') { var m = btn.getAttribute('data-month'); mutate(function(){ state.meses = state.meses.filter(function(x){ return x !== m; }); state.padres.forEach(function(p){ delete p.pagos[m]; }); }); }
     else if (action === 'add-parent') { addParentFromForm(); }
     else if (action === 'add-month') { addMonthFromForm(); }
