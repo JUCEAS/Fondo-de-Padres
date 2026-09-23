@@ -1,0 +1,15 @@
+{
+  "name": "Fondo de Graduación",
+  "short_name": "Graduación",
+  "description": "Registro de aportaciones mensuales para el fondo de graduación",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FAF6EC",
+  "theme_color": "#1C3A5E",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
