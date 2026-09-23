@@ -8,10 +8,10 @@
 // (ver README.md).
 
 var firebaseConfig = {
-  apiKey: "PEGA_AQUI_TU_API_KEY",
-  authDomain: "PEGA_AQUI.firebaseapp.com",
-  projectId: "PEGA_AQUI",
-  storageBucket: "PEGA_AQUI.appspot.com",
-  messagingSenderId: "PEGA_AQUI",
-  appId: "PEGA_AQUI"
+  apiKey: "AIzaSyCNwL0Vy8Etf9N08GHLNruspzUxoRSbX90",
+  authDomain: "fondo-de-padres.firebaseapp.com",
+  projectId: "fondo-de-padres",
+  storageBucket: "fondo-de-padres.firebasestorage.app",
+  messagingSenderId: "149411305735",
+  appId: "1:149411305735:web:12c34a41c796a1a3e40da2"
 };
