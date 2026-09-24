@@ -154,3 +154,10 @@ tfoot td{ font-weight:700; border-top:2px solid var(--paper-line); border-bottom
   .add-group{ flex-direction:column; align-items:stretch; }
   .add-group input{ min-width:0; }
 }
+
+/* ---------- Acceso con Google ---------- */
+.login-screen{ max-width:420px; margin:48px auto; text-align:center; }
+.login-screen .btn{ margin-top:8px; }
+.login-screen .hint{ font-size:.85rem; color:var(--ink-soft); }
+.lista-lectores{ list-style:none; margin:4px 0 8px; padding:0; }
+.lista-lectores li{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--paper-line); font-size:.9rem; }
