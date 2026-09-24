@@ -1,4 +1,4 @@
-var CACHE = 'fondo-graduacion-v3';
+var CACHE = 'fondo-graduacion-v4';
 var ASSETS = [
   './',
   './index.html',
