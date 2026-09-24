@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// Reglas de seguridad del Fondo de Graduación
+// Pegar completo en: Firebase Console (proyecto fondo-de-padres) → Firestore Database → Reglas → Publicar
+//
+// - Editores: solo las cuentas de la lista (misma lista que EDITORES en app.js).
+// - Supervisores de solo lectura: los correos que el editor agrega desde Ajustes
+//   (se guardan en fondoGraduacion/acceso, campo "lectores").
+// - Nadie más puede leer ni escribir nada.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function correo() {
+      return request.auth.token.email.lower();
+    }
+
+    function conSesion() {
+      return request.auth != null
+        && request.auth.token.email_verified == true;
+    }
+
+    function esEditor() {
+      return conSesion() && correo() in [
+        'juceas19@gmail.com',
+        'sairareyes4@gmail.com'
+      ];
+    }
+
+    function esLector() {
+      let acceso = /databases/$(database)/documents/fondoGraduacion/acceso;
+      return conSesion()
+        && exists(acceso)
+        && correo() in get(acceso).data.get('lectores', []);
+    }
+
+    // Datos del fondo: padres, meses y pagos
+    match /fondoGraduacion/estado {
+      allow read: if esEditor() || esLector();
+      allow write: if esEditor();
+    }
+
+    // Lista de supervisores: solo los editores la ven y la cambian
+    match /fondoGraduacion/acceso {
+      allow read, write: if esEditor();
+    }
+
+    // Todo lo demás: cerrado
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
