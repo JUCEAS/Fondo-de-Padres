@@ -278,7 +278,7 @@
     var monthCells = state.meses.map(function(m){
       var v = num(p.pagos[m]);
       if (editorUnlocked && !p.retirado) {
-        return '<td class="col-month amt-cell"><input type="number" class="amt-input" inputmode="decimal" step="0.01" min="0" placeholder="0.00" data-parent="' + p.id + '" data-month="' + escapeHtml(m) + '" value="' + (v ? v : '') + '"></td>';
+        return '<td class="col-month amt-cell"><input type="number" class="amt-input" inputmode="decimal" step="0.01" min="0" placeholder="0.00" data-parent="' + escapeHtml(p.id) + '" data-month="' + escapeHtml(m) + '" value="' + (v ? v : '') + '"></td>';
       }
       return '<td class="col-month amt-cell"><span class="amt-static">' + (v ? fmt(v) : '—') + '</span></td>';
     }).join('');
@@ -292,9 +292,9 @@
 
     var actionsCell = '<td class="col-del">' + (editorUnlocked ? (
         (p.retirado ?
-          '<button type="button" class="mini-x" data-action="reactivar-parent" data-id="' + p.id + '" title="Reactivar a este padre">↺</button>' :
-          '<button type="button" class="mini-x" data-action="mark-retiro" data-id="' + p.id + '" title="Marcar como retirado y registrar devolución">↩</button>') +
-        '<button type="button" class="mini-x" data-action="delete-parent" data-id="' + p.id + '" title="Eliminar padre por completo (borra su historial, sin dejar rastro)">✕</button>'
+          '<button type="button" class="mini-x" data-action="reactivar-parent" data-id="' + escapeHtml(p.id) + '" title="Reactivar a este padre">↺</button>' :
+          '<button type="button" class="mini-x" data-action="mark-retiro" data-id="' + escapeHtml(p.id) + '" title="Marcar como retirado y registrar devolución">↩</button>') +
+        '<button type="button" class="mini-x" data-action="delete-parent" data-id="' + escapeHtml(p.id) + '" title="Eliminar padre por completo (borra su historial, sin dejar rastro)">✕</button>'
       ) : '') + '</td>';
 
     return '<tr' + (p.retirado ? ' style="opacity:.6"' : '') + '>' +
@@ -314,7 +314,7 @@
         '<input type="number" min="0" step="0.01" id="retiro-monto" value="' + num(totalPadre(p)) + '"></div>' +
       '<p class="hint">Aportó ' + fmt(totalPadre(p)) + ' en total. Ajustá el monto si solo se le devuelve una parte. ' +
         'El padre queda marcado como "Retirado" — no se borra, y su historial sigue apareciendo en el reporte PDF.</p>' +
-      '<button type="button" class="btn btn-primary btn-sm" data-action="confirm-retiro" data-id="' + p.id + '">Confirmar retiro</button>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-action="confirm-retiro" data-id="' + escapeHtml(p.id) + '">Confirmar retiro</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-action="cancel-retiro">Cancelar</button>' +
     '</section>';
   }
