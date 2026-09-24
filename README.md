@@ -31,26 +31,13 @@ la base de datos (siguiente paso).
 3. En el menú izquierdo, entrá a **Firestore Database** → "Crear base de
    datos" → modo **producción** → elegí una región cercana (por ejemplo
    `us-central`).
-4. Andá a **Reglas** (dentro de Firestore) y pegá esto para que la app pueda
-   leer y escribir:
-
-   ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /fondoGraduacion/{doc} {
-         allow read, write: if true;
-       }
-     }
-   }
-   ```
-
-   **Nota honesta:** esto deja la base de datos abierta a quien tenga la
-   configuración del proyecto (que queda visible en el código de la app).
-   No es un candado bancario — es el mismo nivel de seguridad que Encantos.
-   Para este uso (un fondo de graduación de un grupo de padres) es
-   razonable; si más adelante manejás algo más sensible, se puede agregar
-   autenticación real.
+4. Andá a **Reglas** (dentro de Firestore), borrá lo que haya y pegá el
+   contenido completo del archivo **`firestore.rules`** de esta carpeta.
+   Tocá **Publicar**. Esas reglas hacen que solo los editores autorizados
+   puedan modificar, y solo editores y supervisores autorizados puedan ver.
+   En **Authentication → Método de acceso** activá **Google**, y en
+   **Authentication → Configuración → Dominios autorizados** agregá
+   `juceas.github.io`.
 
 5. Andá al ícono de engranaje ⚙ → **Configuración del proyecto** → pestaña
    **Tus apps** → ícono `</>` (Web) → registrá una app (el nombre no
@@ -63,15 +50,15 @@ la base de datos (siguiente paso).
 
 ## 3. Usarla en cada dispositivo
 
-- **Computadora y teléfono editor:** abrí el link de GitHub Pages. La
-  primera vez, tocá "Desbloquear edición" e ingresá el PIN inicial
-  `0000`. Una vez adentro, andá a Ajustes (⚙) y cambialo por uno propio.
-- **Teléfono supervisor:** abrí el mismo link y no ingreses ningún PIN —
-  se queda en modo "Solo lectura" automáticamente. Ve los mismos datos,
-  pero no puede modificarlos.
-- El "desbloqueo" queda guardado en cada dispositivo por separado
-  (`localStorage`), así que no hay que volver a escribir el PIN cada vez
-  que se abre la app en ese mismo teléfono o computadora.
+- **Editores** (los correos de la lista `EDITORES` en `app.js` y en
+  `firestore.rules`): abrí el link, tocá **Entrar con Google** y elegí tu
+  cuenta. La sesión queda guardada en ese dispositivo.
+- **Supervisores (solo lectura):** un editor agrega su Gmail desde
+  Ajustes (⚙) → "Supervisores". Luego esa persona abre el link y entra con
+  ese Gmail: ve los mismos datos, pero no puede modificarlos.
+- Cualquier otra cuenta, o alguien sin sesión, no ve ningún dato.
+- Para agregar otro **editor** hay que sumar su correo en `app.js`
+  (lista `EDITORES`) y en `firestore.rules`, y volver a publicar las reglas.
 
 ## 4. Instalarla como app (opcional pero recomendado)
 
@@ -92,7 +79,8 @@ se sincronizan solos cuando vuelve la conexión).
 |---|---|
 | `index.html` | Página principal |
 | `styles.css` | Diseño visual |
-| `app.js` | Toda la lógica: tabla, totales, PIN, PDF, WhatsApp, Firebase |
+| `app.js` | Toda la lógica: tabla, totales, acceso con Google, PDF, WhatsApp, Firebase |
+| `firestore.rules` | Reglas de seguridad para pegar en Firebase |
 | `firebase-config.js` | Tu configuración de Firebase (la editás vos) |
 | `manifest.json` | Hace que se pueda instalar como app |
 | `service-worker.js` | Permite que funcione sin internet |
