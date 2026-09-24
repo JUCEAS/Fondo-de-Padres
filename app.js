@@ -9,31 +9,30 @@
     meses: [],
     padres: []
   };
-  var DEFAULT_PIN = '0000';
 
-  var db = null, docRef = null, configRef = null;
+  // ---------- Acceso ----------
+  // Quién puede EDITAR: solo estas cuentas de Google. La MISMA lista debe estar
+  // en las reglas de Firestore (firestore.rules), que son las que de verdad
+  // protegen los datos. Los supervisores de solo lectura se agregan desde
+  // Ajustes dentro de la app (se guardan en fondoGraduacion/acceso).
+  var EDITORES = ['juceas19@gmail.com', 'sairareyes4@gmail.com'];
+
+  var db = null, auth = null, docRef = null, configRef = null;
+  var unsubEstado = null, unsubAcceso = null;
   var state = null;
-  var appConfig = { pin: null };
+  var lectores = [];
   var editorUnlocked = false;
-  var viewerLocked = false;
+  var authState = 'checking'; // checking | signed-out | denied | ok
+  var userEmail = '';
+  var loginError = '';
   var settingsOpen = false;
-  var pinPanelOpen = false;
   var retiroPanelFor = null;
-  var pinError = '';
   var connStatus = 'connecting'; // connecting | synced | offline | error | config
 
-  try { editorUnlocked = localStorage.getItem('fg_editor') === '1'; } catch (e) {}
-  try { viewerLocked = localStorage.getItem('fg_viewer_locked') === '1'; } catch (e) {}
+  // Limpieza del sistema de PIN anterior (ya no se usa)
+  try { localStorage.removeItem('fg_editor'); localStorage.removeItem('fg_viewer_locked'); } catch (e) {}
 
-  // Una vez que un dispositivo se fija como "solo lectura", el botón para
-  // desbloquear edición desaparece. Para recuperarlo en ese mismo dispositivo
-  // (por ejemplo si vos mismo lo bloqueaste sin querer), abrí la app agregando
-  // ?editor al final del link, ej: https://tu-link/?editor
-  function showUnlockOption(){
-    if (editorUnlocked) return false;
-    if (!viewerLocked) return true;
-    try { return /[?&#]editor\b/.test(window.location.href); } catch (e) { return false; }
-  }
+  function esCorreoValido(c){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c); }
 
   function uid(){ return 'p' + Math.random().toString(36).slice(2, 9); }
   function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
@@ -88,33 +87,12 @@
     try {
       firebase.initializeApp(firebaseConfig);
       db = firebase.firestore();
+      auth = firebase.auth();
       try { db.enablePersistence({ synchronizeTabs: true }).catch(function(){}); } catch (e) {}
+      try { auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){}); } catch (e) {}
       docRef = db.collection('fondoGraduacion').doc('estado');
       configRef = db.collection('fondoGraduacion').doc('acceso');
-
-      docRef.onSnapshot(function(snap){
-        if (snap.exists) {
-          state = normalizeState(snap.data());
-        } else {
-          state = Object.assign({}, DEFAULT_STATE);
-          docRef.set(state).catch(function(){});
-        }
-        connStatus = navigator.onLine === false ? 'offline' : 'synced';
-        render();
-      }, function(){
-        connStatus = 'error';
-        if (!state) state = Object.assign({}, DEFAULT_STATE);
-        render();
-      });
-
-      configRef.get().then(function(snap){
-        if (snap.exists && snap.data().pin) {
-          appConfig.pin = snap.data().pin;
-        } else {
-          appConfig.pin = DEFAULT_PIN;
-          configRef.set({ pin: DEFAULT_PIN }, { merge: true }).catch(function(){});
-        }
-      }).catch(function(){ appConfig.pin = DEFAULT_PIN; });
+      auth.onAuthStateChanged(alCambiarSesion);
     } catch (e) {
       connStatus = 'error';
       state = Object.assign({}, DEFAULT_STATE);
@@ -125,40 +103,91 @@
     window.addEventListener('offline', function(){ if (connStatus !== 'config') { connStatus = 'offline'; render(); } });
   }
 
+  function detenerEscuchas(){
+    if (unsubEstado) { unsubEstado(); unsubEstado = null; }
+    if (unsubAcceso) { unsubAcceso(); unsubAcceso = null; }
+  }
+
+  function alCambiarSesion(user){
+    detenerEscuchas();
+    state = null; lectores = []; settingsOpen = false; retiroPanelFor = null;
+    if (!user) {
+      userEmail = ''; editorUnlocked = false; authState = 'signed-out';
+      render();
+      return;
+    }
+    userEmail = String(user.email || '').toLowerCase();
+    editorUnlocked = EDITORES.indexOf(userEmail) !== -1;
+    authState = 'checking';
+    render();
+
+    unsubEstado = docRef.onSnapshot(function(snap){
+      authState = 'ok';
+      if (snap.exists) {
+        state = normalizeState(snap.data());
+      } else {
+        state = Object.assign({}, DEFAULT_STATE);
+        if (editorUnlocked) docRef.set(state).catch(function(){});
+      }
+      connStatus = navigator.onLine === false ? 'offline' : 'synced';
+      render();
+    }, function(err){
+      if (err && err.code === 'permission-denied') {
+        authState = 'denied';
+      } else {
+        connStatus = 'error';
+        if (!state) state = Object.assign({}, DEFAULT_STATE);
+        authState = 'ok';
+      }
+      render();
+    });
+
+    if (editorUnlocked) {
+      unsubAcceso = configRef.onSnapshot(function(snap){
+        var d = snap.exists ? snap.data() : {};
+        lectores = Array.isArray(d.lectores) ? d.lectores : [];
+        // Borra el PIN viejo que quedaba guardado en la base de datos
+        if (!snap.exists || 'pin' in d) configRef.set({ lectores: lectores }).catch(function(){});
+        render();
+      }, function(){});
+    }
+  }
+
+  function iniciarSesion(){
+    loginError = '';
+    var proveedor = new firebase.auth.GoogleAuthProvider();
+    proveedor.setCustomParameters({ prompt: 'select_account' });
+    auth.signInWithPopup(proveedor).catch(function(err){
+      if (err && (err.code === 'auth/popup-blocked' || err.code === 'auth/operation-not-supported-in-this-environment')) {
+        auth.signInWithRedirect(proveedor);
+        return;
+      }
+      if (err && err.code === 'auth/popup-closed-by-user') return;
+      loginError = 'No se pudo iniciar sesión (' + ((err && err.code) || 'error') + '). Intentá de nuevo.';
+      render();
+    });
+  }
+
+  function cerrarSesion(){
+    if (auth) auth.signOut();
+  }
+
+  function guardarLectores(lista){
+    if (!editorUnlocked || !configRef) return;
+    lectores = lista;
+    render();
+    configRef.set({ lectores: lista }).catch(function(){ alert('No se pudo guardar la lista de supervisores.'); });
+  }
+
   function persist(){
     if (!docRef || !state) return;
     docRef.set(state).catch(function(){});
   }
   function mutate(fn){
-    if (!editorUnlocked || !state) return;
+    if (!editorUnlocked || !state || authState !== 'ok') return;
     fn();
     render();
     persist();
-  }
-
-  function tryUnlock(pin){
-    if (!appConfig.pin) { pinError = 'Todavía cargando, esperá un segundo e intentá de nuevo.'; render(); return; }
-    if (pin === appConfig.pin) {
-      editorUnlocked = true;
-      try { localStorage.setItem('fg_editor', '1'); } catch (e) {}
-      pinPanelOpen = false; pinError = '';
-      render();
-    } else {
-      pinError = 'PIN incorrecto.';
-      render();
-    }
-  }
-  function lockDevice(){
-    editorUnlocked = false;
-    try { localStorage.removeItem('fg_editor'); } catch (e) {}
-    settingsOpen = false;
-    retiroPanelFor = null;
-    render();
-  }
-  function changePin(newPin){
-    if (!editorUnlocked || !configRef || !newPin) return;
-    appConfig.pin = newPin;
-    configRef.set({ pin: newPin }, { merge: true }).catch(function(){});
   }
 
   // ---------- rendering ----------
@@ -196,14 +225,39 @@
     '</section>';
   }
 
-  function pinPanelHTML(){
-    return '<section class="pin-panel">' +
-      '<div class="field"><label for="pin-input">PIN de edición</label><input type="password" inputmode="numeric" id="pin-input" placeholder="••••" maxlength="12" autocomplete="off"></div>' +
-      '<button type="button" class="btn btn-primary btn-sm" data-action="submit-pin">Desbloquear</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-action="cancel-pin">Cancelar</button>' +
-      (pinError ? '<p class="pin-error">' + escapeHtml(pinError) + '</p>' : '') +
-      '<p class="hint">PIN inicial: <strong>' + escapeHtml(DEFAULT_PIN) + '</strong> (cambialo desde Ajustes una vez adentro).</p>' +
+  function loginScreenHTML(){
+    var cuerpo;
+    if (authState === 'checking') {
+      cuerpo = '<p>Comprobando acceso…</p>';
+    } else if (authState === 'denied') {
+      cuerpo = '<p>La cuenta <strong>' + escapeHtml(userEmail) + '</strong> no tiene acceso a este fondo.</p>' +
+        '<p class="hint">Pedile a la persona que administra el fondo que agregue tu correo como supervisor, o entrá con otra cuenta.</p>' +
+        '<button type="button" class="btn btn-primary" data-action="logout">Entrar con otra cuenta</button>';
+    } else {
+      cuerpo = '<p>Los datos del fondo son privados. Entrá con tu cuenta de Google autorizada para verlos.</p>' +
+        '<button type="button" class="btn btn-primary" data-action="login">Entrar con Google</button>' +
+        (loginError ? '<p class="pin-error">' + escapeHtml(loginError) + '</p>' : '');
+    }
+    return '<section class="setup-screen login-screen">' +
+      '<div class="brand" style="justify-content:center;margin-bottom:8px">' + CAP_SVG + '</div>' +
+      '<h2>Fondo de Graduación</h2>' + cuerpo +
     '</section>';
+  }
+
+  function lectoresHTML(){
+    return '<div class="field" style="grid-column:1/-1">' +
+        '<label>Supervisores (solo lectura)</label>' +
+        (lectores.length ?
+          '<ul class="lista-lectores">' + lectores.map(function(c){
+            return '<li><span>' + escapeHtml(c) + '</span><button type="button" class="mini-x" data-action="remove-lector" data-email="' + escapeHtml(c) + '" title="Quitar acceso">✕</button></li>';
+          }).join('') + '</ul>' :
+          '<p class="hint" style="margin:4px 0 8px">Nadie más tiene acceso de solo lectura todavía.</p>') +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+          '<input type="email" id="new-lector" placeholder="correo@gmail.com" autocomplete="off" style="flex:1;min-width:180px">' +
+          '<button type="button" class="btn btn-outline btn-sm" data-action="add-lector">Dar acceso</button>' +
+        '</div>' +
+        '<p class="hint" style="margin-top:6px">Esa persona entra con ese Gmail y solo puede ver, no modificar.</p>' +
+      '</div>';
   }
 
   function settingsPanelHTML(){
@@ -212,8 +266,7 @@
       '<div class="field"><label for="set-promocion">Subtítulo (curso, colegio…)</label><input type="text" id="set-promocion" value="' + escapeHtml(state.promocion) + '"></div>' +
       '<div class="field field-sm"><label for="set-moneda">Moneda</label><input type="text" id="set-moneda" value="' + escapeHtml(state.moneda) + '" maxlength="4"></div>' +
       '<div class="field field-sm"><label for="set-cuota">Cuota mensual sugerida</label><input type="number" id="set-cuota" min="0" step="0.01" value="' + num(state.cuota) + '"></div>' +
-      '<div class="field field-sm"><label for="set-pin">Cambiar PIN de edición</label><input type="text" inputmode="numeric" id="set-pin" placeholder="Nuevo PIN" maxlength="12"></div>' +
-      '<button type="button" class="btn btn-ghost btn-sm" data-action="lock-device">Bloquear este dispositivo</button>' +
+      lectoresHTML() +
       '<button type="button" class="btn btn-ghost btn-sm" data-action="toggle-settings">Listo</button>' +
     '</section>';
   }
@@ -341,14 +394,11 @@
           connBadgeHTML() +
           (editorUnlocked ?
             '<span class="badge badge-editor">Editor</span><button type="button" class="icon-btn" data-action="toggle-settings" title="Ajustes">⚙</button>' :
-            '<span class="badge badge-view">Solo lectura</span>' + (showUnlockOption() ?
-              '<button type="button" class="btn btn-outline btn-sm" data-action="open-pin">Desbloquear edición</button>' +
-              '<button type="button" class="icon-btn" data-action="lock-viewer" title="Fijar este dispositivo como solo lectura y no volver a mostrar este botón">🔒</button>'
-              : '')) +
+            '<span class="badge badge-view">Solo lectura</span>') +
+          '<button type="button" class="btn btn-ghost btn-sm" data-action="logout" title="' + escapeHtml(userEmail) + '">Salir</button>' +
         '</div>' +
       '</header>' +
 
-      (pinPanelOpen ? pinPanelHTML() : '') +
       (settingsOpen && editorUnlocked ? settingsPanelHTML() : '') +
       (retiroPanelFor && editorUnlocked ? (function(){
         var rp = state.padres.filter(function(x){ return x.id === retiroPanelFor; })[0];
@@ -387,6 +437,7 @@
   function render(){
     var root = document.getElementById('root');
     if (!root) return;
+    if (connStatus !== 'config' && authState !== 'ok') { root.innerHTML = loginScreenHTML(); return; }
     if (!state && connStatus !== 'config') { root.innerHTML = '<p class="loading">Cargando…</p>'; return; }
     root.innerHTML = bodyHTML();
   }
@@ -503,15 +554,18 @@
     if (!btn) return;
     var action = btn.getAttribute('data-action');
     if (action === 'toggle-settings') { settingsOpen = !settingsOpen; render(); }
-    else if (action === 'open-pin') { pinPanelOpen = true; pinError = ''; render(); setTimeout(function(){ var el = document.getElementById('pin-input'); if (el) el.focus(); }, 0); }
-    else if (action === 'cancel-pin') { pinPanelOpen = false; pinError = ''; render(); }
-    else if (action === 'submit-pin') { var el = document.getElementById('pin-input'); tryUnlock(el ? el.value.trim() : ''); }
-    else if (action === 'lock-device') { lockDevice(); }
-    else if (action === 'lock-viewer') {
-      viewerLocked = true;
-      try { localStorage.setItem('fg_viewer_locked', '1'); } catch (e) {}
-      pinPanelOpen = false;
-      render();
+    else if (action === 'login') { iniciarSesion(); }
+    else if (action === 'logout') { if (authState !== 'ok' || confirm('¿Cerrar sesión en este dispositivo? Vas a necesitar internet para volver a entrar.')) cerrarSesion(); }
+    else if (action === 'add-lector') {
+      var le = document.getElementById('new-lector');
+      var correo = ((le && le.value) || '').trim().toLowerCase();
+      if (!esCorreoValido(correo)) { alert('Escribí un correo válido, por ejemplo nombre@gmail.com'); return; }
+      if (EDITORES.indexOf(correo) !== -1) { alert('Ese correo ya es editor.'); return; }
+      if (lectores.indexOf(correo) === -1) guardarLectores(lectores.concat([correo]));
+    }
+    else if (action === 'remove-lector') {
+      var quitar = btn.getAttribute('data-email');
+      if (confirm('¿Quitar el acceso de ' + quitar + '?')) guardarLectores(lectores.filter(function(c){ return c !== quitar; }));
     }
     else if (action === 'delete-parent') { var id = btn.getAttribute('data-id'); mutate(function(){ state.padres = state.padres.filter(function(p){ return p.id !== id; }); }); }
     else if (action === 'mark-retiro') {
@@ -557,7 +611,6 @@
     else if (t.id === 'set-promocion') { mutate(function(){ state.promocion = t.value; }); }
     else if (t.id === 'set-moneda') { mutate(function(){ state.moneda = t.value.trim() || 'L'; }); }
     else if (t.id === 'set-cuota') { mutate(function(){ state.cuota = num(t.value); }); }
-    else if (t.id === 'set-pin') { var v = t.value.trim(); if (v) { changePin(v); t.value = ''; } }
   });
 
   document.addEventListener('keydown', function(e){
@@ -565,7 +618,7 @@
     var id = e.target && e.target.id;
     if (id === 'new-parent-name' || id === 'new-parent-student') { e.preventDefault(); addParentFromForm(); }
     else if (id === 'new-month-label') { e.preventDefault(); addMonthFromForm(); }
-    else if (id === 'pin-input') { e.preventDefault(); tryUnlock(e.target.value.trim()); }
+    else if (id === 'new-lector') { e.preventDefault(); var b = document.querySelector('[data-action="add-lector"]'); if (b) b.click(); }
   });
 
   if ('serviceWorker' in navigator) {
