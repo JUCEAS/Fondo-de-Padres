@@ -3,9 +3,8 @@
 // "Configuración del proyecto" → pestaña "Tus apps" → app web → "SDK setup and configuration".
 //
 // Es seguro que estos valores queden visibles en el código: no son una contraseña,
-// son el identificador público de tu proyecto. La protección real la da el PIN
-// de edición dentro de la app y, si querés más seguridad, las reglas de Firestore
-// (ver README.md).
+// son el identificador público de tu proyecto. La protección real la dan las
+// reglas de Firestore (firestore.rules) junto con el acceso con Google.
 
 var firebaseConfig = {
   apiKey: "AIzaSyCNwL0Vy8Etf9N08GHLNruspzUxoRSbX90",
